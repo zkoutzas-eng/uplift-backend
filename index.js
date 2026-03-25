@@ -97,15 +97,33 @@ app.post('/api/employee/setup', async (req, res) => {
 
 // ─── DASHBOARD ─────────────────────────────────────────────────────
 app.get('/api/dashboard/:company_id', async (req, res) => {
-  const { company_id } = req.params;
+  try {
+    const { company_id } = req.params;
 
-  const { data: company } = await supabase.from('companies').select('*').eq('id', company_id).single();
-  const { data: employees } = await supabase.from('employees').select('*, employee_preferences(*)').eq('company_id', company_id);
+    const { data: company, error: companyError } = await supabase
+      .from('companies').select('*').eq('id', company_id).single();
 
-  const setupComplete = employees?.filter(e => e.setup_complete).length || 0;
-  const trialDaysLeft = Math.max(0, Math.ceil((new Date(company.trial_end) - new Date()) / (1000 * 60 * 60 * 24)));
+    if (companyError || !company) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
 
-  res.json({ company, employees, setupComplete, trialDaysLeft });
+    const { data: employees } = await supabase
+      .from('employees')
+      .select('*, employee_preferences(*)')
+      .eq('company_id', company_id);
+
+    const setupComplete = (employees || []).filter(e => e.setup_complete).length;
+
+    let trialDaysLeft = 14;
+    if (company.trial_end) {
+      trialDaysLeft = Math.max(0, Math.ceil((new Date(company.trial_end) - new Date()) / (1000 * 60 * 60 * 24)));
+    }
+
+    res.json({ company, employees: employees || [], setupComplete, trialDaysLeft });
+  } catch (err) {
+    console.error('Dashboard error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ─── RESEND INVITE ─────────────────────────────────────────────────
@@ -137,10 +155,8 @@ app.post('/api/employees/resend', async (req, res) => {
 // ─── DELETE EMPLOYEE ───────────────────────────────────────────────
 app.delete('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-
   await supabase.from('employee_preferences').delete().eq('employee_id', id);
   const { error } = await supabase.from('employees').delete().eq('id', id);
-
   if (error) return res.status(400).json({ error: error.message });
   res.json({ success: true });
 });
